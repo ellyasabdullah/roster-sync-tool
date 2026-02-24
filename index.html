@@ -24,7 +24,8 @@
         const { useState, useEffect, useRef } = React;
 
         // --- CONFIGURATION ---
-        const GEMINI_API_KEY = "AIzaSyAOXzbSBE9X5qsUvUcl6LJ3Uf0jXzXLFyY"; 
+        // CRITICAL: Ensure you have added Website Restrictions in Google Cloud before pasting this here.
+        const GEMINI_API_KEY = "AIzaSyCmlAuHlsnnf4Gu9SXClxtX-hUFsbAvksk"; 
         const CLIENT_ID = "724634857433-lf5n8p0noabrpjl90f4f61nr6voqcp5n.apps.googleusercontent.com";
         const SCOPES = 'https://www.googleapis.com/auth/calendar.events';
 
@@ -42,10 +43,11 @@
             const [status, setStatus] = useState({ type: '', message: '' });
             const [briefing, setBriefing] = useState("");
             const [flightTips, setFlightTips] = useState({});
-            const [logs, setLogs] = useState(["System Started (v5.8.2)"]);
+            const [logs, setLogs] = useState(["System Started (v5.8.3)"]);
             
             const fileInputRef = useRef(null);
             const tokenClient = useRef(null);
+            const modelRef = useRef(null); 
 
             const addLog = (msg) => {
                 console.log(msg);
@@ -101,53 +103,62 @@
                 }
             };
 
-            // DIRECT MODEL LOOPER
             const callGemini = async (promptText, base64Image = null) => {
-                // Testing multiple models directly to bypass discovery blocks
-                const models = [
-                    'gemini-1.5-flash',
-                    'gemini-2.0-flash',
-                    'gemini-1.5-pro',
-                    'gemini-1.5-flash-002'
-                ];
-                
-                let lastError = "";
-                const parts = [{ text: promptText }];
-                if (base64Image) parts.push({ inlineData: { mimeType: "image/png", data: base64Image } });
-                const payload = { contents: [{ parts }] };
-
-                for (const model of models) {
-                    addLog(`Trying model: ${model}...`);
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-                    
+                if (!modelRef.current) {
+                    addLog("Querying Google for your authorized AI models...");
                     try {
-                        const response = await fetch(url, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-
-                        const data = await response.json();
-
-                        if (response.ok) {
-                            addLog(`Success with ${model}!`);
-                            return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                        } else {
-                            lastError = data.error?.message || `HTTP ${response.status}`;
-                            addLog(`Failed (${model}): ${lastError}`);
-                            
-                            // If Google explicitly blocks the API Key, stop looping to prevent spam
-                            if (response.status === 403 || lastError.toLowerCase().includes("api key not valid")) {
-                                throw new Error(`Google Cloud blocked the request: ${lastError}`);
-                            }
+                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+                        if (!res.ok) {
+                            const errData = await res.json();
+                            throw new Error(errData.error?.message || "Failed to check models. Verify API key.");
                         }
+                        const data = await res.json();
+                        
+                        const valid = (data.models || []).filter(m => 
+                            m.name.includes("gemini") && 
+                            m.supportedGenerationMethods?.includes("generateContent")
+                        );
+
+                        if (valid.length === 0) throw new Error("Your API key has no active Gemini models.");
+                        
+                        const target = valid.find(m => m.name.includes("1.5-flash")) 
+                                    || valid.find(m => m.name.includes("2.5-flash"))
+                                    || valid.find(m => m.name.includes("2.0-flash"))
+                                    || valid.find(m => m.name.includes("pro"))
+                                    || valid[0];
+                                    
+                        modelRef.current = target.name;
+                        addLog(`Auto-selected model: ${target.name}`);
                     } catch (e) {
-                        addLog(`Error: ${e.message}`);
-                        if (e.message.includes("Google Cloud blocked")) throw e;
-                        lastError = e.message;
+                        addLog(`Model Discovery Error: ${e.message}`);
+                        throw e;
                     }
                 }
-                throw new Error(`All AI models failed. Last error: ${lastError}`);
+
+                const url = `https://generativelanguage.googleapis.com/v1beta/${modelRef.current}:generateContent?key=${GEMINI_API_KEY}`;
+                
+                const parts = [{ text: promptText }];
+                if (base64Image) parts.push({ inlineData: { mimeType: "image/png", data: base64Image } });
+
+                const payload = { contents: [{ parts }] };
+                addLog(`Sending request to ${modelRef.current}...`);
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    addLog("AI Request Successful!");
+                    const result = await response.json();
+                    return result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                } else {
+                    const err = await response.json();
+                    const errMsg = err.error?.message || `HTTP ${response.status}`;
+                    addLog(`AI Request Failed: ${errMsg}`);
+                    throw new Error(errMsg);
+                }
             };
 
             const handleImageUpload = (e) => {
@@ -346,7 +357,7 @@
                                             <div className="text-3xl font-black text-emerald-950 tabular-nums">{f.departureTime24h || f.departureTimeAMPM}</div>
                                             <div className="text-[10px] font-black text-slate-300 uppercase mt-2">{f.arrivalAirportFull}</div>
                                         </div>
-                                        <button onClick={() => syncEventToAPI(f).then(() => setStatus({type:'success', message: `Synced ${f.flightNumber}`})).catch(e => setStatus({type:'error', message: e.message}))} className="bg-emerald-600 text-white h-20 w-20 rounded-[2.5rem] flex items-center justify-center shadow-xl active:scale-90 text-3xl">
+                                        <button onClick={() => syncEventToAPI(f).then(() => setStatus({type:'success', message: `Synced ${f.flightNumber}!`})).catch(e => setStatus({type:'error', message: e.message}))} className="bg-emerald-600 text-white h-20 w-20 rounded-[2.5rem] flex items-center justify-center shadow-xl active:scale-90 text-3xl">
                                             <IconPlus />
                                         </button>
                                     </div>
@@ -367,11 +378,11 @@
                     <div className="max-w-4xl mx-auto mt-20 bg-slate-950 rounded-2xl p-6 shadow-2xl border border-slate-800">
                         <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
                             <h3 className="text-xs font-black uppercase text-emerald-500 tracking-widest">System Logs (Diagnostics)</h3>
-                            <span className="text-[10px] text-slate-500 font-mono">v5.8.2</span>
+                            <span className="text-[10px] text-slate-500 font-mono">v5.8.3</span>
                         </div>
                         <div className="space-y-2 max-h-48 overflow-y-auto font-mono text-xs">
                             {logs.map((log, i) => (
-                                <div key={i} className={`${log.includes("ERROR") || log.includes("Failed") || log.includes("Error:") || log.includes("CRITICAL") || log.includes("blocked") ? "text-red-400 font-bold" : "text-emerald-400/80"}`}>
+                                <div key={i} className={`${log.includes("ERROR") || log.includes("Failed") || log.includes("Error:") ? "text-red-400" : "text-emerald-400/80"}`}>
                                     {log}
                                 </div>
                             ))}
@@ -385,3 +396,5 @@
     </script>
 </body>
 </html>
+
+
