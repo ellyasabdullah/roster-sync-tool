@@ -42,10 +42,11 @@
             const [status, setStatus] = useState({ type: '', message: '' });
             const [briefing, setBriefing] = useState("");
             const [flightTips, setFlightTips] = useState({});
-            const [logs, setLogs] = useState(["System Started (v5.7.0)"]);
+            const [logs, setLogs] = useState(["System Started (v5.8.1)"]);
             
             const fileInputRef = useRef(null);
             const tokenClient = useRef(null);
+            const modelRef = useRef(null); // Stores the auto-discovered model
 
             const addLog = (msg) => {
                 console.log(msg);
@@ -101,44 +102,63 @@
                 }
             };
 
+            // AUTO-DISCOVERY ENGINE
             const callGemini = async (promptText, base64Image = null) => {
-                // FIXED: Placed v1 first, and completely removed the "generationConfig" which caused the crash.
-                const endpoints = [
-                    `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-                ];
+                if (!modelRef.current) {
+                    addLog("Querying Google for your authorized AI models...");
+                    try {
+                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+                        if (!res.ok) throw new Error("Failed to check models. Verify API key.");
+                        const data = await res.json();
+                        
+                        // Filter to models that can generate content
+                        const valid = (data.models || []).filter(m => 
+                            m.name.includes("gemini") && 
+                            m.supportedGenerationMethods?.includes("generateContent")
+                        );
+
+                        if (valid.length === 0) throw new Error("Your API key has no active Gemini models.");
+                        
+                        // Find the best available model
+                        const target = valid.find(m => m.name.includes("1.5-flash")) 
+                                    || valid.find(m => m.name.includes("2.5-flash"))
+                                    || valid.find(m => m.name.includes("2.0-flash"))
+                                    || valid.find(m => m.name.includes("pro"))
+                                    || valid[0];
+                                    
+                        modelRef.current = target.name;
+                        addLog(`Auto-selected model: ${target.name}`);
+                    } catch (e) {
+                        addLog(`Model Discovery Error: ${e.message}`);
+                        throw e;
+                    }
+                }
+
+                // Send request using the auto-discovered model
+                const url = `https://generativelanguage.googleapis.com/v1beta/${modelRef.current}:generateContent?key=${GEMINI_API_KEY}`;
                 
-                let lastError = "";
                 const parts = [{ text: promptText }];
                 if (base64Image) parts.push({ inlineData: { mimeType: "image/png", data: base64Image } });
 
-                // Extremely plain payload to ensure maximum compatibility
                 const payload = { contents: [{ parts }] };
+                addLog(`Sending request to ${modelRef.current}...`);
 
-                for (let i = 0; i < endpoints.length; i++) {
-                    addLog(`Trying API Endpoint ${i + 1}...`);
-                    try {
-                        const response = await fetch(endpoints[i], {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
 
-                        if (response.ok) {
-                            addLog(`Success on Endpoint ${i + 1}`);
-                            const result = await response.json();
-                            return result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                        } else {
-                            const err = await response.json();
-                            lastError = err.error?.message || `HTTP ${response.status}`;
-                            addLog(`Endpoint ${i + 1} Failed: ${lastError}`);
-                        }
-                    } catch (e) {
-                        addLog(`Fetch error on Endpoint ${i + 1}: ${e.message}`);
-                        lastError = e.message;
-                    }
+                if (response.ok) {
+                    addLog("AI Request Successful!");
+                    const result = await response.json();
+                    return result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                } else {
+                    const err = await response.json();
+                    const errMsg = err.error?.message || `HTTP ${response.status}`;
+                    addLog(`AI Request Failed: ${errMsg}`);
+                    throw new Error(errMsg);
                 }
-                throw new Error(`All endpoints failed. Last error: ${lastError}`);
             };
 
             const handleImageUpload = (e) => {
@@ -165,12 +185,10 @@
                 setStatus({ type: 'info', message: 'AI is scanning your roster...' });
                 setFlights([]);
                 
-                // Emphasized raw JSON requirement in the prompt since we removed the config
                 const prompt = "Extract flight information from this image into a JSON array. RULES: Flight Number (MH 158), Full Arrival Airport Name, Departure and Arrival Airport IATA codes, Departure and Arrival Cities, Local times in AMPM format, 24h format times, ISO 8601 Times for departure and arrival including offsets (e.g. +08:00), Short Day name (e.g. Tue), Short Date (e.g. 24th Feb), and UTC offsets. \n\nCRITICAL: You MUST respond ONLY with a raw JSON array. Do not include markdown ticks like ```json.";
 
                 try {
                     let text = await callGemini(prompt, base64Image);
-                    // Double check cleanup in case AI adds markdown anyway
                     text = text.replace(/```json\n?|```/g, "").trim();
                     const parsed = JSON.parse(text);
                     const flightArray = Array.isArray(parsed) ? parsed : [parsed];
@@ -339,7 +357,7 @@
                                             <div className="text-3xl font-black text-emerald-950 tabular-nums">{f.departureTime24h || f.departureTimeAMPM}</div>
                                             <div className="text-[10px] font-black text-slate-300 uppercase mt-2">{f.arrivalAirportFull}</div>
                                         </div>
-                                        <button onClick={() => syncEventToAPI(f)} className="bg-emerald-600 text-white h-20 w-20 rounded-[2.5rem] flex items-center justify-center shadow-xl active:scale-90 text-3xl">
+                                        <button onClick={() => syncEventToAPI(f).then(() => setStatus({type:'success', message: `Synced ${f.flightNumber}`})).catch(e => setStatus({type:'error', message: e.message}))} className="bg-emerald-600 text-white h-20 w-20 rounded-[2.5rem] flex items-center justify-center shadow-xl active:scale-90 text-3xl">
                                             <IconPlus />
                                         </button>
                                     </div>
@@ -360,7 +378,7 @@
                     <div className="max-w-4xl mx-auto mt-20 bg-slate-950 rounded-2xl p-6 shadow-2xl border border-slate-800">
                         <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
                             <h3 className="text-xs font-black uppercase text-emerald-500 tracking-widest">System Logs (Diagnostics)</h3>
-                            <span className="text-[10px] text-slate-500 font-mono">v5.7.0</span>
+                            <span className="text-[10px] text-slate-500 font-mono">v5.8.1</span>
                         </div>
                         <div className="space-y-2 max-h-48 overflow-y-auto font-mono text-xs">
                             {logs.map((log, i) => (
@@ -378,5 +396,3 @@
     </script>
 </body>
 </html>
-
-
