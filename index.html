@@ -15,6 +15,13 @@
         body { font-family: 'Inter', sans-serif; }
         .animate-in { animation: fadeIn 0.4s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        /* Custom Checkbox Styling */
+        input[type="checkbox"] {
+            accent-color: #059669; /* emerald-600 */
+            width: 1.5rem;
+            height: 1.5rem;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body class="bg-emerald-50 text-slate-900">
@@ -47,7 +54,7 @@
             const [status, setStatus] = useState({ type: '', message: '' });
             const [briefing, setBriefing] = useState("");
             const [flightTips, setFlightTips] = useState({});
-            const [logs, setLogs] = useState(["System Started (v6.0.0)"]);
+            const [logs, setLogs] = useState(["System Started (v6.1.0)"]);
             
             const fileInputRef = useRef(null);
             const tokenClient = useRef(null);
@@ -68,7 +75,7 @@
                     if (window.google) {
                         try {
                             if (CLIENT_ID.includes("PASTE")) {
-                                addLog("ERROR: Client ID is missing. Google Login will fail.");
+                                addLog("ERROR: Client ID is missing.");
                             } else {
                                 tokenClient.current = window.google.accounts.oauth2.initTokenClient({
                                     client_id: CLIENT_ID,
@@ -86,24 +93,17 @@
                                 });
                                 addLog("Google Identity Services ready.");
                             }
-                        } catch (err) { 
-                            addLog(`GSI Init Error: ${err.message}`); 
-                        }
-                    } else {
-                        addLog("ERROR: window.google is undefined. Script failed to load.");
+                        } catch (err) { addLog(`GSI Init Error: ${err.message}`); }
                     }
                 };
-                script.onerror = () => addLog("ERROR: Failed to load Google Identity script.");
                 document.body.appendChild(script);
             }, []);
 
             const handleGoogleAuth = () => {
-                addLog("Attempting Google Login...");
                 if (tokenClient.current) {
                     tokenClient.current.requestAccessToken({ prompt: 'consent' });
                 } else {
                     setStatus({ type: 'error', message: 'Google library not ready.' });
-                    addLog("Auth failed: tokenClient is not initialized.");
                 }
             };
 
@@ -115,15 +115,8 @@
                         if (!res.ok) throw new Error("Failed to fetch models.");
                         const data = await res.json();
                         
-                        const valid = (data.models || []).filter(m => 
-                            m.name.includes("gemini") && m.supportedGenerationMethods?.includes("generateContent")
-                        );
-
-                        const target = valid.find(m => m.name.includes("1.5-flash")) 
-                                    || valid.find(m => m.name.includes("2.5-flash"))
-                                    || valid.find(m => m.name.includes("2.0-flash"))
-                                    || valid.find(m => m.name.includes("pro"))
-                                    || valid[0];
+                        const valid = (data.models || []).filter(m => m.name.includes("gemini") && m.supportedGenerationMethods?.includes("generateContent"));
+                        const target = valid.find(m => m.name.includes("1.5-flash")) || valid.find(m => m.name.includes("2.5-flash")) || valid.find(m => m.name.includes("2.0-flash")) || valid[0];
                                     
                         modelRef.current = target.name;
                         addLog(`Auto-selected model: ${target.name}`);
@@ -134,13 +127,10 @@
                 }
 
                 const url = `https://generativelanguage.googleapis.com/v1beta/${modelRef.current}:generateContent?key=${GEMINI_API_KEY}`;
-                
                 const parts = [{ text: promptText }];
                 if (base64Image) parts.push({ inlineData: { mimeType: "image/png", data: base64Image } });
 
                 const payload = { contents: [{ parts }] };
-                addLog(`Sending request to ${modelRef.current}...`);
-
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -148,7 +138,6 @@
                 });
 
                 if (response.ok) {
-                    addLog("AI Request Successful!");
                     const result = await response.json();
                     return result.candidates?.[0]?.content?.parts?.[0]?.text || "";
                 } else {
@@ -160,11 +149,9 @@
             const handleImageUpload = (e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                addLog(`File selected: ${file.name}`);
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     const base64Data = reader.result.split(',')[1];
-                    addLog("Image converted to Base64. Starting extraction...");
                     extractFlightData(base64Data);
                 };
                 reader.readAsDataURL(file);
@@ -173,7 +160,6 @@
             const extractFlightData = async (base64Image) => {
                 if (!GEMINI_API_KEY || GEMINI_API_KEY.includes("PASTE")) {
                     setStatus({ type: 'error', message: 'API Key missing in code.' });
-                    addLog("ERROR: API key has not been pasted into the code.");
                     return;
                 }
                 
@@ -181,61 +167,66 @@
                 setStatus({ type: 'info', message: 'AI is scanning your roster...' });
                 setFlights([]);
                 
-                // ENFORCING STRICT SCHEMA
-                const prompt = `Extract flight information from this image into a JSON array. 
+                // STRICT TEMPLATE INJECTION: Forces AI to return exact keys
+                const prompt = `Extract all flights from this roster image into a raw JSON array.
                 
-                CRITICAL INSTRUCTION - You MUST format the output as an array of objects using EXACTLY these keys:
-                - "flightNumber" (e.g. "MH 158")
-                - "departureCode" (e.g. "KUL")
-                - "arrivalCode" (e.g. "MED")
-                - "departureCity" (e.g. "Kuala Lumpur")
-                - "arrivalCity" (e.g. "Medina")
-                - "arrivalAirportFull" (e.g. "King Abdulaziz International Airport")
-                - "departureTime24h" (e.g. "14:30")
-                - "arrivalTime24h" (e.g. "18:45")
-                - "isoDeparture" (e.g. "2026-02-24T14:30:00+08:00")
-                - "isoArrival" (e.g. "2026-02-24T18:45:00+03:00")
-
-                Respond ONLY with the raw JSON array. Do not include markdown formatting, backticks, or explanations.`;
+                CRITICAL INSTRUCTION - You MUST use exactly this structure for each flight:
+                [
+                    {
+                        "flightNumber": "MH 158",
+                        "departureCode": "KUL",
+                        "arrivalCode": "MED",
+                        "departureCity": "Kuala Lumpur",
+                        "arrivalCity": "Medina",
+                        "arrivalAirportFull": "King Abdulaziz International Airport",
+                        "departureTime24h": "14:30",
+                        "arrivalTime24h": "18:45",
+                        "isoDeparture": "2026-02-24T14:30:00+08:00",
+                        "isoArrival": "2026-02-24T18:45:00+03:00"
+                    }
+                ]
+                
+                Ensure times are calculated correctly. Output ONLY raw JSON.`;
 
                 try {
                     let text = await callGemini(prompt, base64Image);
                     text = text.replace(/```json\n?|```/g, "").trim();
                     
-                    let parsed;
-                    try {
-                        parsed = JSON.parse(text);
-                        // Failsafe in case AI nests the array inside an object
-                        if (parsed.flights && Array.isArray(parsed.flights)) parsed = parsed.flights;
-                        if (parsed.data && Array.isArray(parsed.data)) parsed = parsed.data;
-                    } catch (err) {
-                        addLog(`JSON Parse Failed. AI returned: ${text}`);
-                        throw new Error("AI returned incorrectly formatted data.");
-                    }
-
-                    const flightArray = Array.isArray(parsed) ? parsed : [parsed];
+                    let parsed = JSON.parse(text);
+                    if (parsed.flights && Array.isArray(parsed.flights)) parsed = parsed.flights;
+                    
+                    // Add a "selected: true" property to every flight so checkboxes work
+                    const flightArray = (Array.isArray(parsed) ? parsed : [parsed]).map(f => ({ ...f, selected: true }));
+                    
                     setFlights(flightArray);
                     setStatus({ type: 'success', message: `Found ${flightArray.length} flights!` });
-                    addLog(`Extraction complete. Rendered ${flightArray.length} items.`);
+                    addLog(`Extraction complete. Formatted ${flightArray.length} items with selection toggle.`);
                 } catch (error) {
                     setStatus({ type: 'error', message: `Extraction failed. Check logs.` });
-                    addLog(`Extraction Process Failed: ${error.message}`);
+                    addLog(`Extraction Failed: ${error.message}`);
                 } finally {
                     setExtracting(false);
                 }
             };
 
+            const toggleFlightSelection = (index) => {
+                const newFlights = [...flights];
+                newFlights[index].selected = !newFlights[index].selected;
+                setFlights(newFlights);
+            };
+
+            const toggleAll = (selectState) => {
+                setFlights(flights.map(f => ({ ...f, selected: selectState })));
+            };
+
             const generateBriefing = async () => {
                 setGeneratingBrief(true);
-                addLog("Requesting Monthly Briefing...");
-                const prompt = `Provide a short, professional "Monthly Crew Briefing" for these flights: ${JSON.stringify(flights)}. Include timezone shifts, recovery tips, and a monthly health goal.`;
+                const prompt = `Provide a professional "Monthly Crew Briefing" for these flights: ${JSON.stringify(flights)}. Include timezone shifts, recovery tips, and a monthly health goal.`;
                 try {
                     const text = await callGemini(prompt);
                     setBriefing(text);
-                    addLog("Briefing generated successfully.");
                 } catch (error) {
                     setStatus({ type: 'error', message: "Briefing generation failed." });
-                    addLog(`Briefing Error: ${error.message}`);
                 } finally {
                     setGeneratingBrief(false);
                 }
@@ -244,31 +235,22 @@
             const getDestinationTip = async (flight, index) => {
                 setFlightTips(prev => ({ ...prev, [index]: "Thinking... ✨" }));
                 const targetCity = flight.arrivalCity || flight.arrivalCode || "destination";
-                addLog(`Requesting tips for ${targetCity}...`);
                 const prompt = `Provide 3 quick destination tips for crew arriving at ${targetCity}.`;
                 try {
                     const text = await callGemini(prompt);
                     setFlightTips(prev => ({ ...prev, [index]: text }));
-                    addLog(`Tips loaded for ${targetCity}`);
                 } catch (error) {
                     setFlightTips(prev => ({ ...prev, [index]: "Tips unavailable." }));
-                    addLog(`Tips Error: ${error.message}`);
                 }
             };
 
             const syncEventToAPI = async (flight) => {
-                if (!gcalToken) {
-                    addLog("Sync Error: Missing Google Calendar Token.");
-                    throw new Error("Calendar not connected.");
-                }
-                
-                const fNum = flight.flightNumber || "Unknown Flight";
-                addLog(`Syncing flight ${fNum} to Calendar...`);
+                if (!gcalToken) throw new Error("Calendar not connected.");
                 
                 const event = {
-                    'summary': `✈️ (${fNum}) ${flight.departureCode || ''} → ${flight.arrivalCode || ''}`,
+                    'summary': `✈️ (${flight.flightNumber || 'Flight'}) ${flight.departureCode || ''} → ${flight.arrivalCode || ''}`,
                     'location': flight.arrivalAirportFull || flight.arrivalCity || '',
-                    'description': `${fNum} from ${flight.departureCity || ''} to ${flight.arrivalCity || ''}`,
+                    'description': `${flight.flightNumber || 'Flight'} from ${flight.departureCity || ''} to ${flight.arrivalCity || ''}`,
                     'start': { 'dateTime': flight.isoDeparture },
                     'end': { 'dateTime': flight.isoArrival },
                 };
@@ -283,26 +265,35 @@
                     const err = await response.json();
                     throw new Error(err.error?.message || "Google Calendar API rejected the request.");
                 }
-                addLog(`Successfully synced ${fNum}`);
             };
 
-            const syncAll = async () => {
+            const syncSelected = async () => {
                 if (!gcalToken) return handleGoogleAuth();
+                
+                const toSync = flights.filter(f => f.selected);
+                if (toSync.length === 0) {
+                    setStatus({ type: 'error', message: 'No flights selected to sync.' });
+                    return;
+                }
+
                 setSyncingAll(true);
-                addLog("Starting Sync All process...");
+                addLog(`Starting sync for ${toSync.length} selected flights...`);
+                
                 try {
-                    for (const f of flights) {
+                    for (const f of toSync) {
                         await syncEventToAPI(f);
                     }
-                    setStatus({ type: 'success', message: 'All flights synced! ✨' });
-                    addLog("Sync All completed successfully.");
+                    setStatus({ type: 'success', message: `Successfully synced ${toSync.length} flights! ✨` });
+                    addLog("Sync completed successfully.");
                 } catch (e) {
-                    setStatus({ type: 'error', message: 'Sync failed. Check logs.' });
-                    addLog(`Sync All Failed: ${e.message}`);
+                    setStatus({ type: 'error', message: `Sync failed: ${e.message}` });
+                    addLog(`Sync Failed: ${e.message}`);
                 } finally {
                     setSyncingAll(false);
                 }
             };
+
+            const selectedCount = flights.filter(f => f.selected).length;
 
             return (
                 <div className="min-h-screen p-4 md:p-12 pb-64">
@@ -347,6 +338,17 @@
                         </section>
 
                         {flights.length > 0 && (
+                            <div className="mb-12 flex flex-col sm:flex-row justify-between items-center gap-4 px-2">
+                                <div className="flex gap-4">
+                                    <button onClick={() => toggleAll(true)} className="text-xs font-black uppercase tracking-widest text-emerald-700 hover:text-emerald-950 transition-colors">Select All</button>
+                                    <span className="text-slate-300">|</span>
+                                    <button onClick={() => toggleAll(false)} className="text-xs font-black uppercase tracking-widest text-emerald-700 hover:text-emerald-950 transition-colors">Deselect All</button>
+                                </div>
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">{selectedCount} Selected</span>
+                            </div>
+                        )}
+
+                        {flights.length > 0 && (
                             <div className="mb-12 animate-in">
                                 {!briefing ? (
                                     <button onClick={generateBriefing} disabled={generatingBrief} className="w-full bg-emerald-950 text-white py-6 rounded-[2.5rem] font-black shadow-2xl hover:bg-black transition-all flex items-center justify-center gap-3 active:scale-[0.98]">
@@ -363,11 +365,21 @@
 
                         <div className="space-y-8 mb-24">
                             {flights.map((f, i) => (
-                                <div key={i} className="bg-white rounded-[3rem] shadow-xl border border-slate-100 flex flex-col md:flex-row justify-between md:items-center gap-10 p-12 animate-in overflow-hidden relative">
-                                    {/* Fallback Display if AI changes keys again */}
+                                <div key={i} className={`bg-white rounded-[3rem] shadow-xl border-2 flex flex-col md:flex-row justify-between md:items-center gap-10 p-12 animate-in transition-all relative overflow-hidden ${f.selected ? 'border-emerald-400 shadow-emerald-900/10' : 'border-slate-100 opacity-60'}`}>
+                                    
+                                    {/* Selection Checkbox */}
+                                    <div className="absolute top-8 right-8 z-10">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={f.selected} 
+                                            onChange={() => toggleFlightSelection(i)} 
+                                        />
+                                    </div>
+
+                                    {/* Fallback Display if missing crucial data */}
                                     {!f.flightNumber && !f.departureCode && (
-                                        <div className="absolute inset-0 bg-red-50/90 p-6 overflow-auto text-xs font-mono text-red-900 z-10">
-                                            <p className="font-black text-red-600 uppercase mb-2">RAW AI OUTPUT (Key Mismatch)</p>
+                                        <div className="absolute inset-0 bg-red-50/90 p-6 overflow-auto text-xs font-mono text-red-900 z-0 pt-20">
+                                            <p className="font-black text-red-600 uppercase mb-2">RAW AI OUTPUT (Data mapping failed)</p>
                                             {JSON.stringify(f, null, 2)}
                                         </div>
                                     )}
@@ -389,13 +401,13 @@
                                             )}
                                         </div>
                                     </div>
-                                    <div className="flex flex-col items-end gap-6 relative z-0">
+                                    <div className="flex flex-col items-end gap-6 relative z-0 pr-8 md:pr-12">
                                         <div className="text-right">
                                             <div className="text-3xl font-black text-emerald-950 tabular-nums">
                                                 {f.departureTime24h || f.departureTimeAMPM || "00:00"}
                                             </div>
                                             <div className="text-[10px] font-black text-slate-300 uppercase mt-2">
-                                                {f.arrivalAirportFull || f.arrivalCity || "Unknown Airport"}
+                                                {f.arrivalAirportFull || f.arrivalCity || "Unknown"}
                                             </div>
                                         </div>
                                         <button onClick={() => syncEventToAPI(f).then(() => setStatus({type:'success', message: `Synced ${f.flightNumber}!`})).catch(e => setStatus({type:'error', message: e.message}))} className="bg-emerald-600 text-white h-20 w-20 rounded-[2.5rem] flex items-center justify-center shadow-xl active:scale-90 text-3xl">
@@ -408,8 +420,13 @@
 
                         {flights.length > 0 && (
                             <div className="fixed bottom-10 left-0 right-0 px-4 flex justify-center z-50">
-                                <button onClick={syncAll} disabled={syncingAll} className="max-w-md w-full bg-emerald-600 text-white py-6 rounded-[3rem] font-black shadow-2xl active:scale-95 text-xl">
-                                    {syncingAll ? 'Syncing...' : 'Sync All Flights ✨'}
+                                <button 
+                                    onClick={syncSelected} 
+                                    disabled={syncingAll || selectedCount === 0} 
+                                    className="max-w-md w-full bg-emerald-600 text-white py-6 rounded-[3rem] font-black shadow-2xl active:scale-95 text-xl flex items-center justify-center gap-3 disabled:bg-slate-400 disabled:cursor-not-allowed"
+                                >
+                                    <IconSync /> 
+                                    {syncingAll ? 'Syncing...' : `Sync ${selectedCount} Selected Flights ✨`}
                                 </button>
                             </div>
                         )}
@@ -418,8 +435,8 @@
                     {/* DIAGNOSTIC LOGGER UI */}
                     <div className="max-w-4xl mx-auto mt-20 bg-slate-950 rounded-2xl p-6 shadow-2xl border border-slate-800">
                         <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
-                            <h3 className="text-xs font-black uppercase text-emerald-500 tracking-widest">System Logs (Diagnostics)</h3>
-                            <span className="text-[10px] text-slate-500 font-mono">v6.0.0</span>
+                            <h3 className="text-xs font-black uppercase text-emerald-500 tracking-widest">System Logs</h3>
+                            <span className="text-[10px] text-slate-500 font-mono">v6.1.0</span>
                         </div>
                         <div className="space-y-2 max-h-48 overflow-y-auto font-mono text-xs">
                             {logs.map((log, i) => (
@@ -437,5 +454,3 @@
     </script>
 </body>
 </html>
-
-
