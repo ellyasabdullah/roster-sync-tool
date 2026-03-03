@@ -42,7 +42,6 @@
 
         // --- Inline Icons ---
         const IconPlane = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>;
-        const IconSparkles = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M3 5h4"/><path d="M21 17v4"/><path d="M19 19h4"/></svg>;
         const IconSync = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>;
         const IconPlus = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"/></svg>;
 
@@ -50,12 +49,9 @@
             const [gcalToken, setGcalToken] = useState(null);
             const [syncingAll, setSyncingAll] = useState(false);
             const [extracting, setExtracting] = useState(false);
-            const [generatingBrief, setGeneratingBrief] = useState(false);
             const [flights, setFlights] = useState([]);
             const [status, setStatus] = useState({ type: '', message: '' });
-            const [briefing, setBriefing] = useState("");
-            const [flightTips, setFlightTips] = useState({});
-            const [logs, setLogs] = useState(["System Started (v6.3.0)"]);
+            const [logs, setLogs] = useState(["System Started (v6.4.0)"]);
             
             // Calendar Management States
             const [calendars, setCalendars] = useState([]);
@@ -215,6 +211,7 @@
             const handleImageUpload = (e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
+                addLog(`File selected: ${file.name}`);
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     const base64Data = reader.result.split(',')[1];
@@ -233,7 +230,6 @@
                 setStatus({ type: 'info', message: 'AI is scanning your roster...' });
                 setFlights([]);
                 
-                // STRICT TEMPLATE INJECTION: Forces AI to return exact keys
                 const prompt = `Extract all flights from this roster image into a raw JSON array.
                 
                 CRITICAL INSTRUCTION - You MUST use exactly this structure for each flight:
@@ -261,7 +257,6 @@
                     let parsed = JSON.parse(text);
                     if (parsed.flights && Array.isArray(parsed.flights)) parsed = parsed.flights;
                     
-                    // Add a "selected: true" property to every flight so checkboxes work
                     const flightArray = (Array.isArray(parsed) ? parsed : [parsed]).map(f => ({ ...f, selected: true }));
                     
                     setFlights(flightArray);
@@ -283,31 +278,6 @@
 
             const toggleAll = (selectState) => {
                 setFlights(flights.map(f => ({ ...f, selected: selectState })));
-            };
-
-            const generateBriefing = async () => {
-                setGeneratingBrief(true);
-                const prompt = `Provide a professional "Monthly Crew Briefing" for these flights: ${JSON.stringify(flights)}. Include timezone shifts, recovery tips, and a monthly health goal.`;
-                try {
-                    const text = await callGemini(prompt);
-                    setBriefing(text);
-                } catch (error) {
-                    setStatus({ type: 'error', message: "Briefing generation failed." });
-                } finally {
-                    setGeneratingBrief(false);
-                }
-            };
-
-            const getDestinationTip = async (flight, index) => {
-                setFlightTips(prev => ({ ...prev, [index]: "Thinking... ✨" }));
-                const targetCity = flight.arrivalCity || flight.arrivalCode || "destination";
-                const prompt = `Provide 3 quick destination tips for crew arriving at ${targetCity}.`;
-                try {
-                    const text = await callGemini(prompt);
-                    setFlightTips(prev => ({ ...prev, [index]: text }));
-                } catch (error) {
-                    setFlightTips(prev => ({ ...prev, [index]: "Tips unavailable." }));
-                }
             };
 
             const syncEventToAPI = async (flight) => {
@@ -467,21 +437,6 @@
                             </div>
                         )}
 
-                        {flights.length > 0 && (
-                            <div className="mb-12 animate-in">
-                                {!briefing ? (
-                                    <button onClick={generateBriefing} disabled={generatingBrief} className="w-full bg-emerald-950 text-white py-6 rounded-[2.5rem] font-black shadow-2xl hover:bg-black transition-all flex items-center justify-center gap-3 active:scale-[0.98]">
-                                        <IconSparkles /> {generatingBrief ? 'Generating...' : 'Generate Monthly Crew Briefing ✨'}
-                                    </button>
-                                ) : (
-                                    <div className="bg-emerald-950 text-emerald-50 rounded-[3rem] p-12 shadow-2xl relative border-4 border-emerald-800">
-                                        <h3 className="text-xs font-black uppercase text-emerald-500 mb-8">Monthly Operations Briefing</h3>
-                                        <div className="prose prose-invert max-w-none text-emerald-100/90 whitespace-pre-line font-medium leading-relaxed">{briefing}</div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
                         <div className="space-y-8 mb-24">
                             {flights.map((f, i) => (
                                 <div key={i} className={`bg-white rounded-[3rem] shadow-xl border-2 flex flex-col md:flex-row justify-between md:items-center gap-10 p-12 animate-in transition-all relative overflow-hidden ${f.selected ? 'border-emerald-400 shadow-emerald-900/10' : 'border-slate-100 opacity-60'}`}>
@@ -509,15 +464,6 @@
                                         </div>
                                         <div className="text-lg font-bold text-emerald-600/60 uppercase">
                                             {f.departureCode || "---"} → {f.arrivalCode || "---"}
-                                        </div>
-                                        <div className="mt-10 pt-10 border-t border-slate-50">
-                                            {!flightTips[i] ? (
-                                                <button onClick={() => getDestinationTip(f, i)} className="text-[10px] font-black uppercase text-emerald-500 flex items-center gap-3">
-                                                    <IconSparkles /> Fetch Local Crew Intelligence
-                                                </button>
-                                            ) : (
-                                                <div className="bg-emerald-50/50 p-6 rounded-[2rem] text-xs font-bold text-emerald-800/80 italic">{flightTips[i]}</div>
-                                            )}
                                         </div>
                                     </div>
                                     <div className="flex flex-col items-end gap-6 relative z-0 pr-8 md:pr-12">
@@ -555,7 +501,7 @@
                     <div className="max-w-4xl mx-auto mt-20 bg-slate-950 rounded-2xl p-6 shadow-2xl border border-slate-800">
                         <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
                             <h3 className="text-xs font-black uppercase text-emerald-500 tracking-widest">System Logs</h3>
-                            <span className="text-[10px] text-slate-500 font-mono">v6.3.0</span>
+                            <span className="text-[10px] text-slate-500 font-mono">v6.4.0</span>
                         </div>
                         <div className="space-y-2 max-h-48 overflow-y-auto font-mono text-xs">
                             {logs.map((log, i) => (
