@@ -49,7 +49,7 @@
             const [extracting, setExtracting] = useState(false);
             const [flights, setFlights] = useState([]);
             const [status, setStatus] = useState({ type: '', message: '' });
-            const [logs, setLogs] = useState(["System Started (v6.8.0)"]);
+            const [logs, setLogs] = useState(["System Started (v6.9.0)"]);
             
             // Calendar Management States
             const [calendars, setCalendars] = useState([]);
@@ -283,21 +283,24 @@
                 CRITICAL INSTRUCTION - You MUST use exactly this structure for each flight:
                 [
                     {
-                        "flightNumber": "MH 158",
+                        "flightNumber": "MH 843",
                         "departureCode": "KUL",
-                        "arrivalCode": "MED",
+                        "arrivalCode": "BPN",
                         "departureCity": "Kuala Lumpur",
-                        "arrivalCity": "Medina",
-                        "arrivalAirportFull": "King Abdulaziz International Airport",
-                        "isoDeparture": "2026-01-31T19:00:00+08:00",
-                        "isoArrival": "2026-01-31T23:40:00+03:00",
-                        "formattedDepDate": "Sat, Jan 31 2026",
-                        "formattedDepTime": "7:00 PM [+08]",
-                        "formattedArrDate": "Sat, Jan 31 2026",
-                        "formattedArrTime": "11:40 PM [+03]"
+                        "arrivalCity": "Balikpapan",
+                        "arrivalAirportFull": "Sultan Aji Muhammad Sulaiman Sepinggan International Airport",
+                        "isoDeparture": "2026-03-14T06:00:00+08:00",
+                        "isoArrival": "2026-03-14T09:00:00+08:00",
+                        "formattedDepDate": "Sat, Mar 14 2026",
+                        "formattedDepTime": "6:00 AM [+08 MYT]",
+                        "formattedArrDate": "Sat, Mar 14 2026",
+                        "formattedArrTime": "9:00 AM [+08 IDT]",
+                        "flightTime": "03:00",
+                        "aircraftType": "73H",
+                        "dutyType": "OP"
                     }
                 ]
-                Ensure the formatted dates and times exactly match the style shown in the example. Output ONLY raw JSON.`;
+                Ensure the formatted dates and times exactly match the style shown in the example, including the timezone acronym in brackets. Extract the flightTime, aircraftType, and dutyType if present. Output ONLY raw JSON.`;
 
                 try {
                     let text = await callGemini(prompt, base64Image);
@@ -374,23 +377,22 @@
                 const depCode = flight.departureCode || 'Origin';
                 const arrCode = flight.arrivalCode || 'Dest';
                 
-                // Formulate detailed, beautiful description
+                // Build the precise, functional description block
                 const detailedDescription = `${flight.formattedDepDate || ''}
 ${flight.formattedDepTime || ''}
 
 [${fNum}] ${depCode} to ${arrCode}
+[FLT TIME] ${flight.flightTime || 'N/A'}
+[A/C TYPE] ${flight.aircraftType || 'N/A'}
+[DUTY TYPE] ${flight.dutyType || 'OP'}
 
 ${flight.formattedArrDate || ''}
-${flight.formattedArrTime || ''}
-
----
-Type: ${flight.tripType || ''}
-Sector: ${flight.sectorString || ''}`;
+${flight.formattedArrTime || ''}`;
 
                 const event = {
                     'summary': `✈️ (${fNum}) ${depCode} → ${arrCode}`,
                     'location': flight.arrivalAirportFull || flight.arrivalCity || '',
-                    'description': detailedDescription,
+                    'description': detailedDescription.trim(),
                     'start': { 'dateTime': flight.isoDeparture },
                     'end': { 'dateTime': flight.isoArrival },
                 };
@@ -607,7 +609,7 @@ Sector: ${flight.sectorString || ''}`;
                     <div className="mt-16 bg-slate-900 rounded-2xl p-5 shadow-inner mb-24">
                         <div className="flex justify-between items-center mb-3 border-b border-slate-700 pb-2">
                             <h3 className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">Logs</h3>
-                            <span className="text-[10px] text-slate-500 font-mono">v6.8.0</span>
+                            <span className="text-[10px] text-slate-500 font-mono">v6.9.0</span>
                         </div>
                         <div className="space-y-1.5 max-h-32 overflow-y-auto font-mono text-[10px]">
                             {logs.map((log, i) => (
