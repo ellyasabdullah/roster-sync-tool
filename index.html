@@ -51,7 +51,7 @@
             const [extracting, setExtracting] = useState(false);
             const [flights, setFlights] = useState([]);
             const [status, setStatus] = useState({ type: '', message: '' });
-            const [logs, setLogs] = useState(["System Started (v6.5.0)"]);
+            const [logs, setLogs] = useState(["System Started (v6.6.0)"]);
             
             // Calendar Management States
             const [calendars, setCalendars] = useState([]);
@@ -203,6 +203,70 @@
                 reader.readAsDataURL(file);
             };
 
+            const processTripsAndSectors = (rawFlights) => {
+                // Ensure flights are sorted by departure time
+                const sortedFlights = [...rawFlights].sort((a, b) => new Date(a.isoDeparture) - new Date(b.isoDeparture));
+                if (sortedFlights.length === 0) return [];
+
+                // Detect home base from the very first flight in the roster
+                const homeBase = sortedFlights[0].departureCode;
+                addLog(`Detected Home Base as: ${homeBase}`);
+
+                let trips = [];
+                let currentTrip = [];
+
+                // Group flights into Trips
+                for (let i = 0; i < sortedFlights.length; i++) {
+                    const flight = sortedFlights[i];
+                    currentTrip.push(flight);
+                    
+                    const nextFlight = sortedFlights[i + 1];
+                    let endOfTrip = false;
+                    
+                    // A trip ends when you arrive back at your Home Base
+                    if (flight.arrivalCode === homeBase) {
+                        endOfTrip = true;
+                    } 
+                    // Or if it's the very last flight in the list
+                    else if (!nextFlight) {
+                        endOfTrip = true;
+                    }
+
+                    if (endOfTrip) {
+                        trips.push(currentTrip);
+                        currentTrip = [];
+                    }
+                }
+
+                // Process each trip to calculate "Daily Flight", "3 Days Trip", and Sector numbers
+                const enrichedFlights = [];
+                trips.forEach(trip => {
+                    if (trip.length === 0) return;
+                    
+                    const start = new Date(trip[0].isoDeparture);
+                    const end = new Date(trip[trip.length - 1].isoArrival);
+                    
+                    // Strip the time to calculate raw calendar day difference
+                    const startDate = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+                    const endDate = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+                    const dayDiff = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24));
+                    
+                    let tripTypeStr = "";
+                    if (dayDiff === 0) tripTypeStr = "Daily Flight";
+                    else tripTypeStr = `${dayDiff + 1} Days Trip`;
+
+                    // Apply labels to each flight inside this trip
+                    trip.forEach((f, idx) => {
+                        f.tripType = tripTypeStr;
+                        f.sectorString = trip.length === 1 ? 'Sector 1' : `Sector ${idx + 1} of ${trip.length}`;
+                        f.selected = true; // Default selected for syncing
+                        enrichedFlights.push(f);
+                    });
+                });
+
+                return enrichedFlights;
+            };
+
             const extractFlightData = async (base64Image) => {
                 if (!GEMINI_API_KEY || GEMINI_API_KEY.includes("PASTE")) {
                     setStatus({ type: 'error', message: 'API Key missing in code.' });
@@ -237,9 +301,12 @@
                     let parsed = JSON.parse(text);
                     if (parsed.flights && Array.isArray(parsed.flights)) parsed = parsed.flights;
                     
-                    const flightArray = (Array.isArray(parsed) ? parsed : [parsed]).map(f => ({ ...f, selected: true }));
-                    setFlights(flightArray);
-                    setStatus({ type: 'success', message: `Found ${flightArray.length} flights!` });
+                    // Process Trips and Sectors using our smart engine
+                    const rawFlightArray = Array.isArray(parsed) ? parsed : [parsed];
+                    const processedFlights = processTripsAndSectors(rawFlightArray);
+                    
+                    setFlights(processedFlights);
+                    setStatus({ type: 'success', message: `Found ${processedFlights.length} flights!` });
                 } catch (error) {
                     setStatus({ type: 'error', message: `Extraction failed. Check logs.` });
                     addLog(`Extraction Failed: ${error.message}`);
@@ -263,7 +330,7 @@
                 const event = {
                     'summary': `✈️ (${flight.flightNumber || 'Flight'}) ${flight.departureCode || ''} → ${flight.arrivalCode || ''}`,
                     'location': flight.arrivalAirportFull || flight.arrivalCity || '',
-                    'description': `${flight.flightNumber || 'Flight'} from ${flight.departureCity || ''} to ${flight.arrivalCity || ''}`,
+                    'description': `${flight.flightNumber || 'Flight'} from ${flight.departureCity || ''} to ${flight.arrivalCity || ''}\n\nType: ${flight.tripType}\nSector: ${flight.sectorString}`,
                     'start': { 'dateTime': flight.isoDeparture },
                     'end': { 'dateTime': flight.isoArrival },
                 };
@@ -396,10 +463,17 @@
                         {flights.map((f, i) => (
                             <div key={i} className={`bg-white rounded-3xl md:rounded-[3rem] shadow-lg border-2 flex flex-col p-5 md:p-10 animate-in transition-all relative overflow-hidden ${f.selected ? 'border-emerald-400 shadow-emerald-900/10' : 'border-slate-100 opacity-70'}`}>
                                 
-                                {/* Top Row: Sector & Checkbox */}
-                                <div className="flex justify-between items-center mb-4">
-                                    <div className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-black uppercase tracking-widest">Sector {i+1}</div>
-                                    <input type="checkbox" checked={f.selected} onChange={() => toggleFlightSelection(i)} className="w-6 h-6 z-10" />
+                                {/* Top Row: Badges & Checkbox */}
+                                <div className="flex justify-between items-start mb-4">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <div className="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-lg text-[10px] font-black uppercase tracking-widest shadow-sm">
+                                            {f.tripType}
+                                        </div>
+                                        <div className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-bold uppercase tracking-widest shadow-sm">
+                                            {f.sectorString}
+                                        </div>
+                                    </div>
+                                    <input type="checkbox" checked={f.selected} onChange={() => toggleFlightSelection(i)} className="w-6 h-6 z-10 flex-shrink-0 ml-2 mt-1" />
                                 </div>
 
                                 {/* Raw Error Display */}
@@ -411,7 +485,7 @@
                                 )}
                                 
                                 {/* Middle: Flight Info */}
-                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-0">
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-0 mt-2">
                                     <div>
                                         <div className="text-3xl md:text-5xl font-black text-slate-900 tracking-tighter tabular-nums mb-1">
                                             ({f.flightNumber || "N/A"})
@@ -461,7 +535,7 @@
                     <div className="mt-16 bg-slate-900 rounded-2xl p-5 shadow-inner">
                         <div className="flex justify-between items-center mb-3 border-b border-slate-700 pb-2">
                             <h3 className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">Logs</h3>
-                            <span className="text-[10px] text-slate-500 font-mono">v6.5.0</span>
+                            <span className="text-[10px] text-slate-500 font-mono">v6.6.0</span>
                         </div>
                         <div className="space-y-1.5 max-h-32 overflow-y-auto font-mono text-[10px]">
                             {logs.map((log, i) => (
