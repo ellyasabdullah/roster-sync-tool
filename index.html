@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Sync Roster Intelligence</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -12,7 +12,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; }
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
         .animate-in { animation: fadeIn 0.4s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         /* Custom Checkbox Styling */
@@ -21,10 +21,11 @@
             width: 1.5rem;
             height: 1.5rem;
             cursor: pointer;
+            border-radius: 0.25rem;
         }
     </style>
 </head>
-<body class="bg-emerald-50 text-slate-900">
+<body class="bg-emerald-50 text-slate-900 pb-safe">
     <div id="root"></div>
 
     <script type="text/babel">
@@ -37,7 +38,6 @@
         
         const GEMINI_API_KEY = GEMINI_API_KEY_PART_1 + GEMINI_API_KEY_PART_2; 
         const CLIENT_ID = "724634857433-lf5n8p0noabrpjl90f4f61nr6voqcp5n.apps.googleusercontent.com";
-        // Expanded scope to allow creating new calendars
         const SCOPES = 'https://www.googleapis.com/auth/calendar';
 
         // --- Inline Icons ---
@@ -51,7 +51,7 @@
             const [extracting, setExtracting] = useState(false);
             const [flights, setFlights] = useState([]);
             const [status, setStatus] = useState({ type: '', message: '' });
-            const [logs, setLogs] = useState(["System Started (v6.4.0)"]);
+            const [logs, setLogs] = useState(["System Started (v6.5.0)"]);
             
             // Calendar Management States
             const [calendars, setCalendars] = useState([]);
@@ -69,7 +69,7 @@
             };
 
             useEffect(() => {
-                addLog("Initializing Google Identity Services...");
+                addLog("Initializing Google Identity...");
                 const script = document.createElement('script');
                 script.src = "https://accounts.google.com/gsi/client";
                 script.async = true;
@@ -95,7 +95,7 @@
                                         fetchCalendars(response.access_token);
                                     },
                                 });
-                                addLog("Google Identity Services ready.");
+                                addLog("Google Identity ready.");
                             }
                         } catch (err) { addLog(`GSI Init Error: ${err.message}`); }
                     }
@@ -109,7 +109,6 @@
                     tokenClient.current.requestAccessToken({ prompt: 'consent' });
                 } else {
                     setStatus({ type: 'error', message: 'Google library not ready.' });
-                    addLog("Auth failed: tokenClient is not initialized.");
                 }
             };
 
@@ -124,14 +123,9 @@
                         const writableCals = data.items.filter(c => c.accessRole === 'writer' || c.accessRole === 'owner');
                         setCalendars(writableCals);
                         const primaryCal = writableCals.find(c => c.primary);
-                        if (primaryCal) {
-                            setSelectedCalendar(primaryCal.id);
-                        } else if (writableCals.length > 0) {
-                            setSelectedCalendar(writableCals[0].id);
-                        }
+                        if (primaryCal) setSelectedCalendar(primaryCal.id);
+                        else if (writableCals.length > 0) setSelectedCalendar(writableCals[0].id);
                         addLog(`Found ${writableCals.length} writable calendars.`);
-                    } else {
-                        addLog(`Failed to fetch calendars: HTTP ${res.status}`);
                     }
                 } catch (err) {
                     addLog(`Calendar Fetch Error: ${err.message}`);
@@ -144,24 +138,18 @@
                 try {
                     const response = await fetch('https://www.googleapis.com/calendar/v3/calendars', {
                         method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${gcalToken}`,
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Authorization': `Bearer ${gcalToken}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify({ summary: newCalendarName.trim() })
                     });
-
                     if (response.ok) {
                         const newCal = await response.json();
-                        addLog(`Created new calendar: ${newCal.summary}`);
                         setCalendars(prev => [...prev, newCal]);
                         setSelectedCalendar(newCal.id);
                         setIsCreatingCalendar(false);
                         setNewCalendarName("");
                         setStatus({ type: 'success', message: `Calendar "${newCal.summary}" created!` });
                     } else {
-                        const err = await response.json();
-                        throw new Error(err.error?.message || "Failed to create calendar.");
+                        throw new Error("Failed to create calendar.");
                     }
                 } catch (error) {
                     setStatus({ type: 'error', message: `Calendar creation failed.` });
@@ -171,17 +159,13 @@
 
             const callGemini = async (promptText, base64Image = null) => {
                 if (!modelRef.current) {
-                    addLog("Querying Google for authorized AI models...");
                     try {
                         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
                         if (!res.ok) throw new Error("Failed to fetch models.");
                         const data = await res.json();
-                        
                         const valid = (data.models || []).filter(m => m.name.includes("gemini") && m.supportedGenerationMethods?.includes("generateContent"));
                         const target = valid.find(m => m.name.includes("1.5-flash")) || valid.find(m => m.name.includes("2.5-flash")) || valid.find(m => m.name.includes("2.0-flash")) || valid[0];
-                                    
                         modelRef.current = target.name;
-                        addLog(`Auto-selected model: ${target.name}`);
                     } catch (e) {
                         addLog(`Model Discovery Error: ${e.message}`);
                         throw e;
@@ -211,7 +195,6 @@
             const handleImageUpload = (e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                addLog(`File selected: ${file.name}`);
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     const base64Data = reader.result.split(',')[1];
@@ -231,7 +214,6 @@
                 setFlights([]);
                 
                 const prompt = `Extract all flights from this roster image into a raw JSON array.
-                
                 CRITICAL INSTRUCTION - You MUST use exactly this structure for each flight:
                 [
                     {
@@ -247,21 +229,17 @@
                         "isoArrival": "2026-02-24T18:45:00+03:00"
                     }
                 ]
-                
                 Ensure times are calculated correctly. Output ONLY raw JSON.`;
 
                 try {
                     let text = await callGemini(prompt, base64Image);
                     text = text.replace(/```json\n?|```/g, "").trim();
-                    
                     let parsed = JSON.parse(text);
                     if (parsed.flights && Array.isArray(parsed.flights)) parsed = parsed.flights;
                     
                     const flightArray = (Array.isArray(parsed) ? parsed : [parsed]).map(f => ({ ...f, selected: true }));
-                    
                     setFlights(flightArray);
                     setStatus({ type: 'success', message: `Found ${flightArray.length} flights!` });
-                    addLog(`Extraction complete. Formatted ${flightArray.length} items with selection toggle.`);
                 } catch (error) {
                     setStatus({ type: 'error', message: `Extraction failed. Check logs.` });
                     addLog(`Extraction Failed: ${error.message}`);
@@ -282,7 +260,6 @@
 
             const syncEventToAPI = async (flight) => {
                 if (!gcalToken) throw new Error("Calendar not connected.");
-                
                 const event = {
                     'summary': `✈️ (${flight.flightNumber || 'Flight'}) ${flight.departureCode || ''} → ${flight.arrivalCode || ''}`,
                     'location': flight.arrivalAirportFull || flight.arrivalCity || '',
@@ -290,14 +267,12 @@
                     'start': { 'dateTime': flight.isoDeparture },
                     'end': { 'dateTime': flight.isoArrival },
                 };
-                
                 const encodedCalendarId = encodeURIComponent(selectedCalendar);
                 const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodedCalendarId}/events`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${gcalToken}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify(event)
                 });
-                
                 if (!response.ok) {
                     const err = await response.json();
                     throw new Error(err.error?.message || "Google Calendar API rejected the request.");
@@ -306,22 +281,16 @@
 
             const syncSelected = async () => {
                 if (!gcalToken) return handleGoogleAuth();
-                
                 const toSync = flights.filter(f => f.selected);
                 if (toSync.length === 0) {
                     setStatus({ type: 'error', message: 'No flights selected to sync.' });
                     return;
                 }
-
                 setSyncingAll(true);
-                addLog(`Starting sync for ${toSync.length} selected flights...`);
-                
+                addLog(`Starting sync for ${toSync.length} flights...`);
                 try {
-                    for (const f of toSync) {
-                        await syncEventToAPI(f);
-                    }
+                    for (const f of toSync) await syncEventToAPI(f);
                     setStatus({ type: 'success', message: `Successfully synced ${toSync.length} flights! ✨` });
-                    addLog("Sync completed successfully.");
                 } catch (e) {
                     setStatus({ type: 'error', message: `Sync failed: ${e.message}` });
                     addLog(`Sync Failed: ${e.message}`);
@@ -333,184 +302,176 @@
             const selectedCount = flights.filter(f => f.selected).length;
 
             return (
-                <div className="min-h-screen p-4 md:p-12 pb-64">
-                    <div className="max-w-4xl mx-auto">
-                        <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-12 animate-in">
-                            <div>
-                                <h1 className="text-4xl font-black text-emerald-950 flex items-center gap-4 tracking-tighter">
-                                    <span className="p-3 bg-emerald-600 rounded-2xl text-white shadow-xl"><IconPlane /></span> 
-                                    Sync Roster
-                                </h1>
-                            </div>
-                            <div className="flex gap-3">
-                                {!gcalToken ? (
-                                    <button onClick={handleGoogleAuth} className="bg-white border-2 border-emerald-100 text-emerald-700 px-8 py-3 rounded-2xl font-black shadow-sm hover:border-emerald-300 transition-all">
-                                        Connect Calendar
-                                    </button>
-                                ) : (
-                                    <div className="flex flex-col items-end gap-2">
-                                        <div className="bg-emerald-100/50 px-6 py-2.5 rounded-2xl border border-emerald-200 text-xs font-black text-emerald-800 uppercase flex items-center gap-2">
-                                            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                                            Calendar Connected
-                                        </div>
-                                        
-                                        <div className="flex flex-col items-end gap-2 mt-1">
-                                            {!isCreatingCalendar ? (
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sync to:</span>
-                                                    {calendars.length > 0 ? (
-                                                        <select 
-                                                            value={selectedCalendar}
-                                                            onChange={(e) => setSelectedCalendar(e.target.value)}
-                                                            className="bg-white border border-emerald-200 text-emerald-800 text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer max-w-[160px] truncate"
-                                                        >
-                                                            {calendars.map(cal => (
-                                                                <option key={cal.id} value={cal.id}>{cal.summary}</option>
-                                                            ))}
-                                                        </select>
-                                                    ) : (
-                                                        <span className="text-[10px] text-red-500 font-bold">No calendars</span>
-                                                    )}
-                                                    <button 
-                                                        onClick={() => setIsCreatingCalendar(true)}
-                                                        className="text-[10px] font-black uppercase text-emerald-600 hover:text-emerald-800 bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
-                                                    >
-                                                        + New
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <div className="flex items-center gap-2">
-                                                    <input 
-                                                        type="text"
-                                                        placeholder="New Calendar Name"
-                                                        value={newCalendarName}
-                                                        onChange={(e) => setNewCalendarName(e.target.value)}
-                                                        className="bg-white border border-emerald-200 text-emerald-800 text-xs font-bold rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-emerald-500 w-[140px]"
-                                                        autoFocus
-                                                    />
-                                                    <button 
-                                                        onClick={handleCreateCalendar}
-                                                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors shadow-sm"
-                                                    >
-                                                        Save
-                                                    </button>
-                                                    <button 
-                                                        onClick={() => setIsCreatingCalendar(false)}
-                                                        className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors shadow-sm"
-                                                    >
-                                                        ✕
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
+                <div className="min-h-screen p-4 md:p-8 pb-32 md:pb-64 max-w-3xl mx-auto">
+                    
+                    {/* Header */}
+                    <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-5 mb-8 animate-in">
+                        <div>
+                            <h1 className="text-3xl md:text-4xl font-black text-emerald-950 flex items-center gap-3 tracking-tighter">
+                                <span className="p-2.5 bg-emerald-600 rounded-xl text-white shadow-xl"><IconPlane /></span> 
+                                Sync Roster
+                            </h1>
+                        </div>
+                        <div className="w-full md:w-auto">
+                            {!gcalToken ? (
+                                <button onClick={handleGoogleAuth} className="w-full md:w-auto bg-white border-2 border-emerald-100 text-emerald-700 px-6 py-3 rounded-2xl font-black shadow-sm hover:border-emerald-300 transition-all active:scale-95">
+                                    Connect Calendar
+                                </button>
+                            ) : (
+                                <div className="flex flex-col items-start md:items-end gap-2 bg-emerald-50 md:bg-transparent p-3 md:p-0 rounded-2xl md:rounded-none">
+                                    <div className="bg-emerald-100/80 px-4 py-2 rounded-xl border border-emerald-200 text-[10px] md:text-xs font-black text-emerald-800 uppercase flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                                        Calendar Connected
                                     </div>
-                                )}
-                            </div>
-                        </header>
-
-                        <section className="bg-white/60 backdrop-blur-xl rounded-[3rem] shadow-2xl border border-white p-10 mb-10 text-center relative">
-                            <div onClick={() => !extracting && fileInputRef.current?.click()} className={`border-4 border-dashed rounded-[2.5rem] p-16 transition-all cursor-pointer ${extracting ? 'bg-emerald-50/50 border-emerald-200 animate-pulse' : 'hover:bg-white hover:border-emerald-400 border-slate-100 bg-slate-50/20'}`}>
-                                <input type="file" className="hidden" ref={fileInputRef} accept="image/*" onChange={handleImageUpload} disabled={extracting} />
-                                {extracting ? (
-                                    <p className="text-2xl font-black text-emerald-900 italic">Reading Roster...</p>
-                                ) : (
-                                    <div>
-                                        <p className="text-3xl font-black text-slate-800 tracking-tighter">Drop Roster Screenshot</p>
+                                    
+                                    <div className="flex flex-col items-start md:items-end gap-2 w-full">
+                                        {!isCreatingCalendar ? (
+                                            <div className="flex items-center gap-2 w-full md:w-auto">
+                                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest hidden md:inline">Sync to:</span>
+                                                {calendars.length > 0 ? (
+                                                    <select 
+                                                        value={selectedCalendar}
+                                                        onChange={(e) => setSelectedCalendar(e.target.value)}
+                                                        className="flex-1 md:flex-none bg-white border border-emerald-200 text-emerald-800 text-xs font-bold rounded-lg px-2 py-2 outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer max-w-full md:max-w-[160px] truncate shadow-sm"
+                                                    >
+                                                        {calendars.map(cal => <option key={cal.id} value={cal.id}>{cal.summary}</option>)}
+                                                    </select>
+                                                ) : (
+                                                    <span className="text-[10px] text-red-500 font-bold">No calendars</span>
+                                                )}
+                                                <button onClick={() => setIsCreatingCalendar(true)} className="text-[10px] font-black uppercase text-emerald-600 hover:text-emerald-800 bg-emerald-100 px-3 py-2 rounded-lg transition-colors shadow-sm whitespace-nowrap">
+                                                    + New
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-2 w-full md:w-auto">
+                                                <input 
+                                                    type="text" placeholder="Calendar Name" value={newCalendarName} onChange={(e) => setNewCalendarName(e.target.value)}
+                                                    className="flex-1 md:flex-none bg-white border border-emerald-200 text-emerald-800 text-xs font-bold rounded-lg px-2 py-2 outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-[140px] shadow-sm" autoFocus
+                                                />
+                                                <button onClick={handleCreateCalendar} className="bg-emerald-600 text-white text-xs font-bold px-3 py-2 rounded-lg shadow-sm">Save</button>
+                                                <button onClick={() => setIsCreatingCalendar(false)} className="bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-lg shadow-sm">✕</button>
+                                            </div>
+                                        )}
                                     </div>
-                                )}
-                            </div>
-                            {status.message && (
-                                <div className={`mt-10 p-6 rounded-[2rem] font-bold text-sm text-center border-2 ${status.type === 'error' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-emerald-50 text-emerald-800 border-emerald-100'}`}>
-                                    {status.message}
                                 </div>
                             )}
-                        </section>
+                        </div>
+                    </header>
 
-                        {flights.length > 0 && (
-                            <div className="mb-12 flex flex-col sm:flex-row justify-between items-center gap-4 px-2">
-                                <div className="flex gap-4">
-                                    <button onClick={() => toggleAll(true)} className="text-xs font-black uppercase tracking-widest text-emerald-700 hover:text-emerald-950 transition-colors">Select All</button>
-                                    <span className="text-slate-300">|</span>
-                                    <button onClick={() => toggleAll(false)} className="text-xs font-black uppercase tracking-widest text-emerald-700 hover:text-emerald-950 transition-colors">Deselect All</button>
+                    {/* Upload Section */}
+                    <section className="bg-white/80 backdrop-blur-xl rounded-3xl md:rounded-[3rem] shadow-xl border border-white p-6 md:p-10 mb-8 text-center">
+                        <div onClick={() => !extracting && fileInputRef.current?.click()} className={`border-2 md:border-4 border-dashed rounded-2xl md:rounded-[2.5rem] p-8 md:p-12 transition-all cursor-pointer ${extracting ? 'bg-emerald-50/80 border-emerald-300 animate-pulse' : 'hover:bg-slate-50 border-slate-200 bg-slate-50/50'}`}>
+                            <input type="file" className="hidden" ref={fileInputRef} accept="image/*" onChange={handleImageUpload} disabled={extracting} />
+                            {extracting ? (
+                                <p className="text-xl md:text-2xl font-black text-emerald-900 italic">Reading Roster...</p>
+                            ) : (
+                                <div>
+                                    <p className="text-xl md:text-3xl font-black text-slate-800 tracking-tight">Tap to upload Roster</p>
+                                    <p className="text-[10px] md:text-xs font-bold text-slate-400 mt-2 uppercase tracking-widest">Screenshot (PNG/JPG)</p>
                                 </div>
-                                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">{selectedCount} Selected</span>
+                            )}
+                        </div>
+                        {status.message && (
+                            <div className={`mt-6 p-4 rounded-2xl font-bold text-xs md:text-sm text-center border ${status.type === 'error' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-emerald-50 text-emerald-800 border-emerald-100'}`}>
+                                {status.message}
                             </div>
                         )}
+                    </section>
 
-                        <div className="space-y-8 mb-24">
-                            {flights.map((f, i) => (
-                                <div key={i} className={`bg-white rounded-[3rem] shadow-xl border-2 flex flex-col md:flex-row justify-between md:items-center gap-10 p-12 animate-in transition-all relative overflow-hidden ${f.selected ? 'border-emerald-400 shadow-emerald-900/10' : 'border-slate-100 opacity-60'}`}>
-                                    
-                                    {/* Selection Checkbox */}
-                                    <div className="absolute top-8 right-8 z-10">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={f.selected} 
-                                            onChange={() => toggleFlightSelection(i)} 
-                                        />
+                    {/* Selection Controls */}
+                    {flights.length > 0 && (
+                        <div className="mb-6 flex justify-between items-center px-2 bg-slate-100/50 p-3 rounded-2xl">
+                            <div className="flex gap-4">
+                                <button onClick={() => toggleAll(true)} className="text-[10px] md:text-xs font-black uppercase tracking-widest text-emerald-700 hover:text-emerald-900 px-2 py-1">Select All</button>
+                                <span className="text-slate-300">|</span>
+                                <button onClick={() => toggleAll(false)} className="text-[10px] md:text-xs font-black uppercase tracking-widest text-slate-500 hover:text-slate-800 px-2 py-1">None</button>
+                            </div>
+                            <span className="text-[10px] md:text-xs font-bold text-slate-500 uppercase tracking-widest bg-white px-3 py-1 rounded-full shadow-sm">{selectedCount} Selected</span>
+                        </div>
+                    )}
+
+                    {/* Flight Cards Grid */}
+                    <div className="space-y-4 md:space-y-8 mb-24">
+                        {flights.map((f, i) => (
+                            <div key={i} className={`bg-white rounded-3xl md:rounded-[3rem] shadow-lg border-2 flex flex-col p-5 md:p-10 animate-in transition-all relative overflow-hidden ${f.selected ? 'border-emerald-400 shadow-emerald-900/10' : 'border-slate-100 opacity-70'}`}>
+                                
+                                {/* Top Row: Sector & Checkbox */}
+                                <div className="flex justify-between items-center mb-4">
+                                    <div className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-black uppercase tracking-widest">Sector {i+1}</div>
+                                    <input type="checkbox" checked={f.selected} onChange={() => toggleFlightSelection(i)} className="w-6 h-6 z-10" />
+                                </div>
+
+                                {/* Raw Error Display */}
+                                {!f.flightNumber && !f.departureCode && (
+                                    <div className="absolute inset-0 bg-red-50/95 p-4 overflow-auto text-[10px] font-mono text-red-900 z-0 pt-16">
+                                        <p className="font-black text-red-600 uppercase mb-2">RAW AI OUTPUT</p>
+                                        {JSON.stringify(f, null, 2)}
                                     </div>
-
-                                    {/* Fallback Display if missing crucial data */}
-                                    {!f.flightNumber && !f.departureCode && (
-                                        <div className="absolute inset-0 bg-red-50/90 p-6 overflow-auto text-xs font-mono text-red-900 z-0 pt-20">
-                                            <p className="font-black text-red-600 uppercase mb-2">RAW AI OUTPUT (Data mapping failed)</p>
-                                            {JSON.stringify(f, null, 2)}
-                                        </div>
-                                    )}
-                                    
-                                    <div className="flex-1 relative z-0">
-                                        <div className="text-5xl font-black text-slate-900 tracking-tighter tabular-nums mb-2">
+                                )}
+                                
+                                {/* Middle: Flight Info */}
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-0">
+                                    <div>
+                                        <div className="text-3xl md:text-5xl font-black text-slate-900 tracking-tighter tabular-nums mb-1">
                                             ({f.flightNumber || "N/A"})
                                         </div>
-                                        <div className="text-lg font-bold text-emerald-600/60 uppercase">
+                                        <div className="text-sm md:text-lg font-bold text-emerald-600/70 uppercase tracking-tight">
                                             {f.departureCode || "---"} → {f.arrivalCode || "---"}
                                         </div>
                                     </div>
-                                    <div className="flex flex-col items-end gap-6 relative z-0 pr-8 md:pr-12">
-                                        <div className="text-right">
-                                            <div className="text-3xl font-black text-emerald-950 tabular-nums">
+
+                                    {/* Bottom: Times & Sync Button */}
+                                    <div className="flex items-center justify-between md:flex-col md:items-end border-t border-slate-100 md:border-0 pt-4 md:pt-0 gap-4">
+                                        <div className="text-left md:text-right flex-1">
+                                            <div className="text-2xl md:text-3xl font-black text-emerald-950 tabular-nums">
                                                 {f.departureTime24h || f.departureTimeAMPM || "00:00"}
                                             </div>
-                                            <div className="text-[10px] font-black text-slate-300 uppercase mt-2">
+                                            <div className="text-[10px] font-black text-slate-400 uppercase mt-1 leading-tight max-w-[180px] md:max-w-none truncate">
                                                 {f.arrivalAirportFull || f.arrivalCity || "Unknown"}
                                             </div>
                                         </div>
-                                        <button onClick={() => syncEventToAPI(f).then(() => setStatus({type:'success', message: `Synced ${f.flightNumber}!`})).catch(e => setStatus({type:'error', message: e.message}))} className="bg-emerald-600 text-white h-20 w-20 rounded-[2.5rem] flex items-center justify-center shadow-xl active:scale-90 text-3xl">
+                                        <button 
+                                            onClick={() => syncEventToAPI(f).then(() => setStatus({type:'success', message: `Synced ${f.flightNumber}!`})).catch(e => setStatus({type:'error', message: e.message}))} 
+                                            className="bg-emerald-600 text-white h-12 w-12 md:h-16 md:w-16 rounded-xl md:rounded-[2rem] flex items-center justify-center shadow-lg active:scale-90 text-xl flex-shrink-0"
+                                        >
                                             <IconPlus />
                                         </button>
                                     </div>
                                 </div>
-                            ))}
-                        </div>
-
-                        {flights.length > 0 && (
-                            <div className="fixed bottom-10 left-0 right-0 px-4 flex justify-center z-50">
-                                <button 
-                                    onClick={syncSelected} 
-                                    disabled={syncingAll || selectedCount === 0} 
-                                    className="max-w-md w-full bg-emerald-600 text-white py-6 rounded-[3rem] font-black shadow-2xl active:scale-95 text-xl flex items-center justify-center gap-3 disabled:bg-slate-400 disabled:cursor-not-allowed"
-                                >
-                                    <IconSync /> 
-                                    {syncingAll ? 'Syncing...' : `Sync ${selectedCount} Selected Flights ✨`}
-                                </button>
                             </div>
-                        )}
+                        ))}
                     </div>
 
-                    {/* DIAGNOSTIC LOGGER UI */}
-                    <div className="max-w-4xl mx-auto mt-20 bg-slate-950 rounded-2xl p-6 shadow-2xl border border-slate-800">
-                        <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
-                            <h3 className="text-xs font-black uppercase text-emerald-500 tracking-widest">System Logs</h3>
-                            <span className="text-[10px] text-slate-500 font-mono">v6.4.0</span>
+                    {/* Fixed Sync Button */}
+                    {flights.length > 0 && (
+                        <div className="fixed bottom-0 left-0 right-0 p-4 pt-12 pb-safe bg-gradient-to-t from-white via-white/90 to-transparent z-50 flex justify-center backdrop-blur-sm pointer-events-none">
+                            <button 
+                                onClick={syncSelected} 
+                                disabled={syncingAll || selectedCount === 0} 
+                                className="max-w-md w-full bg-emerald-900 text-white py-5 rounded-3xl font-black shadow-2xl active:scale-95 text-lg flex items-center justify-center gap-3 disabled:bg-slate-300 disabled:text-slate-500 transition-all pointer-events-auto"
+                            >
+                                <IconSync /> 
+                                {syncingAll ? 'Syncing...' : `Sync ${selectedCount} Selected ✨`}
+                            </button>
                         </div>
-                        <div className="space-y-2 max-h-48 overflow-y-auto font-mono text-xs">
+                    )}
+
+                    {/* Diagnostic Logs */}
+                    <div className="mt-16 bg-slate-900 rounded-2xl p-5 shadow-inner">
+                        <div className="flex justify-between items-center mb-3 border-b border-slate-700 pb-2">
+                            <h3 className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">Logs</h3>
+                            <span className="text-[10px] text-slate-500 font-mono">v6.5.0</span>
+                        </div>
+                        <div className="space-y-1.5 max-h-32 overflow-y-auto font-mono text-[10px]">
                             {logs.map((log, i) => (
-                                <div key={i} className={`${log.includes("ERROR") || log.includes("Failed") || log.includes("Error:") ? "text-red-400" : "text-emerald-400/80"}`}>
+                                <div key={i} className={`${log.includes("ERROR") || log.includes("Failed") ? "text-red-400" : "text-emerald-300/80"}`}>
                                     {log}
                                 </div>
                             ))}
                         </div>
                     </div>
+
                 </div>
             );
         }
@@ -519,3 +480,5 @@
     </script>
 </body>
 </html>
+
+
